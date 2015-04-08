@@ -1,5 +1,7 @@
 import sys
 import time
+import json
+import win32api, win32con
 from pygame.locals import *
 import pygame, pygame.joystick, pygame.event
 
@@ -29,7 +31,7 @@ class GamePadInput:
         self.axes = [self.stick.get_axis(x) for x in range(self.stick.get_numaxes())]
 
     def refresh_hats(self):
-        self.hats = [self.stick.get_hat(x) for x in range(self.stick.get_numhats())]
+        self.hats = sum([list(self.stick.get_hat(x)) for x in range(self.stick.get_numhats())], [])
 
     def refresh_buttons(self):
         self.buttons = [self.stick.get_button(x) for x in range(self.stick.get_numbuttons())]
@@ -53,8 +55,8 @@ class GamePadInput:
         return {"serial":self.serial, "axes":self.axes, "buttons":self.buttons, "hats":self.hats}
 
 class rate_limiter:
-    def __init__(self,fun,pred,timings):
-        self.fun = fun
+    def __init__(self,pred,timings,instream):
+        self.instream = instream
         self.pred = pred
         self.timings = timings
         self.mode = 0
@@ -66,12 +68,10 @@ class rate_limiter:
     
     def stream(self):
         sleeptime = self.timings[self.mode][1]
-        print 'sleep',sleeptime
         time.sleep(sleeptime)
-        event = self.fun()
+        event = self.instream.stream()
         if self.last is None or self.pred(self.last,event):
             if self.remaining is not None:
-                print 'remaining',self.remaining
                 self.remaining -= 1
                 if self.remaining == 0:
                     self.mode += 1
@@ -82,11 +82,73 @@ class rate_limiter:
         self.last = event
         return event
 
+class TranslateMouse:
+    def __init__(self,settings,instream):
+        self.settings = settings
+        self.instream = instream
+        self.prev = { }
+
+    def get_val(self,key,event,setting_row):
+        elabel, eindex = setting_row[:2]
+        scale = setting_row[2] if len(setting_row) >= 3 else 1.0
+        offset = setting_row[3] if len(setting_row) >= 4 else 0.0
+        raw_ev = event[elabel][eindex]
+        ev = (scale * raw_ev)
+        return ev
+
+    def stream(self):
+        event = self.instream.stream()
+        if event is None:
+            return None
+        current = dict((k,0) for k in self.settings.keys())
+        for k in self.settings.keys():
+            p = self.prev[k] if k in self.prev else 0
+            current[k] = sum(self.get_val(k,event,x) for x in settings[k])
+            if abs(current[k]) < 0.05:
+                current[k] = 0
+        self.prev = current
+        return current
+
+def win32_produce_event(settings,old,event):
+    if len(event):
+        event_flags = 0
+        event_data = 0
+        if 'mouse_x' or 'mouse_y' in event:
+            event_flags |= win32con.MOUSEEVENTF_MOVE
+            event['mouse_x'] = event['mouse_x'] if 'mouse_x' in event else 0
+            event['mouse_y'] = event['mouse_y'] if 'mouse_y' in event else 0
+        button_sets = {
+            'mouse_button_left': [win32con.MOUSEEVENTF_LEFTUP, win32con.MOUSEEVENTF_LEFTDOWN],
+            'mouse_button_right': [win32con.MOUSEEVENTF_RIGHTUP, win32con.MOUSEEVENTF_RIGHTDOWN],
+            'mouse_button_middle': [win32con.MOUSEEVENTF_MIDDLEUP, win32con.MOUSEEVENTF_MIDDLEDOWN]
+        }
+        for key in button_sets.keys():
+            event[key] = event[key] if key in event else 0
+            old[key] = old[key] if key in old else 0
+            if (old[key] > 0.5) != (event[key] > 0.5):
+                event_flags |= button_sets[key][int(event[key] > 0.5)]
+        if 'mouse_wheel' in event:
+            event_flags |= win32con.MOUSEEVENTF_WHEEL
+            event_data = int(event['mouse_wheel'])
+        win32api.mouse_event(event_flags, int(event['mouse_x']), int(event['mouse_y']), int(event_data))
+    return event
+
 job = GamePadInput()
 if len(sys.argv) > 1:
     job.attach(int(sys.argv[1]))
-    r = rate_limiter(job.stream,lambda x,y: x['serial'] == y['serial'],[(250,0.01),(250,0.1),(None,1)])
+    settings = {
+        'mouse_x':[['axes',0,8],['hats',0,2]],
+        'mouse_y':[['axes',1,8],['hats',1,-2]],
+        'mouse_wheel':[['axes',3,10]],
+        'mouse_button_left':[['buttons',0],['buttons',4]],
+        'mouse_button_right':[['buttons',1],['buttons',5]]
+    }
+    if len(sys.argv) > 2:
+        settings = json.load(sys.argv[2])
+    r = rate_limiter(lambda x,y: x['serial'] == y['serial'],[(250,0.01),(250,0.1),(None,1)], job)
+    r = TranslateMouse(settings,r)
+    old = { }
     for event in iter(r.stream, None):
-        print event
+        old = win32_produce_event(settings,old,event)
 else:
     print job.sticks
