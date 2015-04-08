@@ -162,7 +162,7 @@ if len(sys.argv) > 1:
         'ctrl':[['buttons',5]]
     }
     if len(sys.argv) > 2:
-        settings = json.load(sys.argv[2])
+        settings = json.load(open(sys.argv[2]))
     r = rate_limiter(lambda x,y: x['serial'] == y['serial'],[(250,0.01),(250,0.1),(None,1)], job)
     r = TranslateMouse(settings,r)
     old_mouse, old_keybd = { }, { }
