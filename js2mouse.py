@@ -109,7 +109,7 @@ class TranslateMouse:
         self.prev = current
         return current
 
-def win32_produce_event(settings,old,event):
+def win32_produce_mouse_event(settings,old,event):
     if len(event):
         event_flags = 0
         event_data = 0
@@ -133,6 +133,22 @@ def win32_produce_event(settings,old,event):
         win32api.mouse_event(event_flags, int(event['mouse_x']), int(event['mouse_y']), int(event_data))
     return event
 
+def win32_produce_keybd_event(settings,old,event):
+    allkeys = {
+        'shift':[win32con.VK_LSHIFT, 0x2a],
+        'ctrl':[win32con.VK_LCONTROL, 0x1d],
+        'alt':[win32con.VK_LMENU, 0x38],
+    }
+    if len(event):
+        for key in allkeys.keys():
+            event_flags = 0
+            if key in event:
+                old[key] = old[key] if key in old else 0
+                if (old[key] > 0.5) != (event[key] > 0.5):
+                    event_flags |= win32con.KEYEVENTF_KEYUP if event[key] < 0.5 else 0
+                    win32api.keybd_event(event_flags, allkeys[key][0], allkeys[key][1])
+    return event
+
 job = GamePadInput()
 if len(sys.argv) > 1:
     job.attach(int(sys.argv[1]))
@@ -140,15 +156,18 @@ if len(sys.argv) > 1:
         'mouse_x':[['axes',0,8],['hats',0,2]],
         'mouse_y':[['axes',1,8],['hats',1,-2]],
         'mouse_wheel':[['axes',3,10]],
-        'mouse_button_left':[['buttons',0],['buttons',4]],
-        'mouse_button_right':[['buttons',1],['buttons',5]]
+        'mouse_button_left':[['buttons',0]],
+        'shift':[['buttons',4]],
+        'mouse_button_right':[['buttons',1]],
+        'ctrl':[['buttons',5]]
     }
     if len(sys.argv) > 2:
         settings = json.load(sys.argv[2])
     r = rate_limiter(lambda x,y: x['serial'] == y['serial'],[(250,0.01),(250,0.1),(None,1)], job)
     r = TranslateMouse(settings,r)
-    old = { }
+    old_mouse, old_keybd = { }, { }
     for event in iter(r.stream, None):
-        old = win32_produce_event(settings,old,event)
+        old_keybd = win32_produce_keybd_event(settings,old_keybd,event)
+        old_mouse = win32_produce_mouse_event(settings,old_mouse,event)
 else:
     print job.sticks
