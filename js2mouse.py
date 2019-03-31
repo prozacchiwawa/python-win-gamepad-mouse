@@ -132,7 +132,11 @@ def linux_produce_mouse_event(settings,old,event):
                 device.emit(button_sets[key], int(event[key] > 0.5))
         if 'mouse_wheel' in event:
             if event['mouse_wheel'] != 0:
-                device.emit(uinput.REL_WHEEL, int(event['mouse_wheel']))
+                event['wh_serial'] = old['wh_serial'] if 'wh_serial' in old else 0
+                event['wh_serial'] = (event['wh_serial'] + 1) % int(10.0 / event['mouse_wheel'])
+                if event['wh_serial'] == 0:
+                    mw = -1 if event['mouse_wheel'] < 0 else 1
+                    device.emit(uinput.REL_WHEEL, int(mw))
     return event
 
 def linux_produce_keybd_event(settings,old,event):
@@ -158,7 +162,7 @@ if len(sys.argv) > 1:
     settings = {
         'mouse_x':[['axes',0,8],['hats',0,2]],
         'mouse_y':[['axes',1,8],['hats',1,-2]],
-        'mouse_wheel':[['axes',4,2]],
+        'mouse_wheel':[['axes',4,-2.0]],
         'mouse_button_left':[['buttons',0]],
         'shift':[['buttons',4]],
         'mouse_button_right':[['buttons',1]],
